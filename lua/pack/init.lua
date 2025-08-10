@@ -7,12 +7,12 @@ M.installed_plugins = {}
 M.setup_functions = {}
 
 -- Add a plugin source
-M.add_source = function(source)
+M.src = function(source)
     M.sources[#M.sources + 1] = source
 end
 
 -- Require modules and collect their sources
-M.require_modules = function(module_path)
+M.require = function(module_path)
     local config_path = vim.fn.stdpath("config") .. "/lua/" .. module_path:gsub("%.", "/")
 
     local is_file = vim.fn.filereadable(config_path .. ".lua") == 1
@@ -31,7 +31,7 @@ end
 M._load_module = function(module_path)
     local ok, module = pcall(require, module_path)
     if ok and type(module) == "table" and module.src then
-        M.add_source(module)
+        M.src(module)
     end
 end
 
@@ -198,4 +198,4 @@ M.install = function()
     end
 end
 
-return M
+return M;
