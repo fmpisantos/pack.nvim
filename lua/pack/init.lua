@@ -47,6 +47,9 @@ end
 
 -- Setup a plugin with dependency resolution
 local function setup_plugin(setup_config, plugin_name, dependency_chain)
+    if setup_config == nil then
+        return true
+    end
     -- Check if plugin is installed
     if not M.installed_plugins[plugin_name] then
         print(plugin_name .. " was not installed.")
