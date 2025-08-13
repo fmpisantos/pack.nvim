@@ -164,6 +164,38 @@ return {
   end
 }
 ```
+
+#### Plugin with Event Triggering
+```lua
+-- plugins/ui/statusline.lua
+return {
+  src = "nvim-lualine/lualine.nvim",
+  event = "VimEnter", -- Load on VimEnter event
+  setup = function()
+    require("lualine").setup()
+  end
+}
+```
+
+#### Plugin with Multiple Events
+```lua
+-- plugins/editor/completion.lua
+return {
+  src = "hrsh7th/nvim-cmp",
+  event = {"InsertEnter", "CmdlineEnter"}, -- Load on multiple events
+  deps = {
+    "hrsh7th/cmp-buffer",
+    "hrsh7th/cmp-path"
+  },
+  setup = function()
+    local cmp = require("cmp")
+    cmp.setup({
+      -- configuration here
+    })
+  end
+}
+```
+
 #### Supported `src` Formats
 
 Since pack.nvim uses `vim.pack.add()` internally, your `src` field can use any format supported by `vim.pack.add()`:
@@ -174,13 +206,48 @@ Since pack.nvim uses `vim.pack.add()` internally, your `src` field can use any f
 
 All standard `vim.pack.add()` options are supported. See |vim.pack.Spec| for the complete specification of available options.
 
+#### Plugin Event Loading
+
+You can control when plugins are loaded using the `event` option:
+
+**Parameters:**
+- `event` (string|table): Autocmd event(s) that trigger plugin loading
+  - Single event: `event = "BufRead"`
+  - Multiple events: `event = {"BufRead", "BufNewFile"}`
+
+**Important Notes:**
+- **Oil Files Limitation**: Autocmd events are not available when working with oil files
+- **VimEnter Recommendation**: If you need plugins to load in oil file contexts, use `event = "VimEnter"` as it's the only event that reliably triggers for oil files
+
+**Examples:**
+```lua
+-- Load on file read
+return {
+  src = "nvim-treesitter/nvim-treesitter",
+  event = "BufRead"
+}
+
+-- Load on multiple events
+return {
+  src = "telescope.nvim",
+  event = {"VimEnter", "BufWinEnter"}
+}
+
+-- For oil file compatibility
+return {
+  src = "oil.nvim",
+  event = "VimEnter" -- Only event that works reliably with oil files
+}
+```
+
 ## Benefits
 
 - **Organized Configuration**: Keep related plugins grouped in logical files and directories
 - **Batch Installation**: Install multiple plugins with a single confirmation prompt
-- **Flexible Loading**: Load plugins conditionally or in separate groups
+- **Flexible Loading**: Load plugins conditionally or in separate groups, with event-based triggering
 - **Simple API**: Just two main functions to learn and use
 - **Path Flexibility**: Use directory paths or specific file paths as needed
+- **Event Control**: Fine-tune when plugins load using autocmd events
 
 ## Tips
 
@@ -188,6 +255,8 @@ All standard `vim.pack.add()` options are supported. See |vim.pack.Spec| for the
 2. **Use Descriptive Paths**: Make your plugin organization self-documenting
 3. **Separate Optional Plugins**: Use multiple `install()` calls to separate essential from optional plugins
 4. **Leverage Conditionals**: Only load plugins when needed based on project type or environment
+5. **Choose Events Wisely**: Use specific events to optimize startup time and plugin loading
+6. **Oil File Consideration**: When working with oil files, prefer `VimEnter` for reliable plugin loading
 
 ## Troubleshooting
 
@@ -195,3 +264,5 @@ All standard `vim.pack.add()` options are supported. See |vim.pack.Spec| for the
 - Check that plugin files return proper configuration tables
 - Verify paths use dot notation correctly (dots instead of slashes)
 - Make sure `pack.install()` is called after all `pack.require()` calls for each group
+- When using events, verify the event names are valid autocmd events
+- For oil file compatibility issues, try using `event = "VimEnter"` instead of other events
