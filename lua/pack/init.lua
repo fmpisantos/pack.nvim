@@ -147,7 +147,7 @@ local function setup_plugin(setup_config, plugin_name, dependency_chain)
                     if vim.v.vim_did_enter ~= 1 then
                         return
                     end
-                    if args.buf > 1 and args.file:match("^oil://") then
+                    if args.event ~= "VimEnter" and args.file:match("^oil://") then
                         return
                     end
                     if not M.setup_completed[plugin_name] then
