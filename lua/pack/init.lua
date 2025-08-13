@@ -144,16 +144,15 @@ local function setup_plugin(setup_config, plugin_name, dependency_chain)
 
             vim.api.nvim_create_autocmd(events, {
                 callback = function(args)
-                    if vim.v.vim_did_enter ~= 1 then
-                        return
-                    end
                     if args.event ~= "VimEnter" and args.file:match("^oil://") then
                         return
                     end
+                    vim.defer_fn(function()
                     if not M.setup_completed[plugin_name] then
                         setup_config.setup()
                         M.setup_completed[plugin_name] = true
                     end
+                    end, 10)
                 end,
             })
         else
