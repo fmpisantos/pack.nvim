@@ -214,7 +214,7 @@ local function prepare_plugin(source, all_plugins, parent_event)
     end
 end
 
-local function cleanup_unused_plugins(required_plugins)
+M.cleanup_unused_plugins = function(required_plugins)
     local installed_packs = vim.pack.get()
     local required_repo_names = {}
 
@@ -314,8 +314,8 @@ M.update_all = function()
     vim.notify("All plugins update completed", vim.log.levels.INFO)
 end
 
--- Main installation function
-M.install = function()
+-- Get all required plugins from sources
+M.get_required_plugins = function()
     local all_plugins = {}
 
     -- Process all sources
@@ -323,8 +323,12 @@ M.install = function()
         prepare_plugin(source, all_plugins, nil)
     end
 
-    -- Clean up plugins that are no longer required
-    cleanup_unused_plugins(all_plugins)
+    return all_plugins
+end
+
+-- Main installation function
+M.install = function()
+    local all_plugins = M.get_required_plugins()
 
     -- Install all plugins
     vim.pack.add(all_plugins)
@@ -333,6 +337,12 @@ M.install = function()
     for plugin_name, setup_config in pairs(M.setup_functions) do
         setup_plugin(setup_config, plugin_name, {})
     end
+end
+
+-- Cleanup unused plugins
+M.cleanup = function()
+    local required_plugins = M.get_required_plugins()
+    M.cleanup_unused_plugins(required_plugins)
 end
 
 -- Completion function for PackUpdate command
@@ -369,6 +379,12 @@ vim.api.nvim_create_user_command("PackUpdateAll", function()
     M.update_all()
 end, {
     desc = "Update all installed plugins"
+})
+
+vim.api.nvim_create_user_command("PackCleanup", function()
+    M.cleanup()
+end, {
+    desc = "Remove unused plugins"
 })
 
 return M;
