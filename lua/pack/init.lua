@@ -168,10 +168,10 @@ local function setup_plugin(setup_config, plugin_name, dependency_chain)
                         return
                     end
                     vim.defer_fn(function()
-                    if not M.setup_completed[plugin_name] then
-                        setup_config.setup()
-                        M.setup_completed[plugin_name] = true
-                    end
+                        if not M.setup_completed[plugin_name] then
+                            setup_config.setup()
+                            M.setup_completed[plugin_name] = true
+                        end
                     end, 10)
                 end,
             })
@@ -226,23 +226,23 @@ local function cleanup_unused_plugins(required_plugins)
         end
     end
 
-    -- Find plugins to remove
-    local plugins_to_remove = {}
+    -- Find plugin names to remove
+    local plugin_names_to_remove = {}
     for _, pack in ipairs(installed_packs) do
         local pack_repo_name = pack.spec.name
         if pack_repo_name and not required_repo_names[pack_repo_name] then
-            table.insert(plugins_to_remove, pack)
+            table.insert(plugin_names_to_remove, pack_repo_name)
         end
     end
 
     -- Remove unused plugins
-    for _, pack in ipairs(plugins_to_remove) do
-        vim.notify("Removing unused plugin: " .. pack.spec.name, vim.log.levels.INFO)
-        vim.pack.del(pack.spec.src)
-    end
+    if #plugin_names_to_remove > 0 then
+        vim.notify("Removing " .. #plugin_names_to_remove .. " unused plugins", vim.log.levels.INFO)
 
-    if #plugins_to_remove > 0 then
-        vim.notify("Removed " .. #plugins_to_remove .. " unused plugins", vim.log.levels.INFO)
+        -- Remove plugins by name
+        vim.pack.del(plugin_names_to_remove)
+
+        vim.notify("Removed " .. #plugin_names_to_remove .. " unused plugins", vim.log.levels.INFO)
     end
 end
 
@@ -288,7 +288,7 @@ M.update = function(plugin_name)
     end
 
     vim.notify("Updating plugin: " .. plugin_name, vim.log.levels.INFO)
-    vim.pack.update({plugin_name})
+    vim.pack.update({ plugin_name })
     vim.notify("Plugin '" .. plugin_name .. "' update completed", vim.log.levels.INFO)
 end
 
