@@ -246,6 +246,24 @@ local function cleanup_unused_plugins(required_plugins)
     end
 end
 
+-- List installed plugins
+M.list = function()
+    local installed_packs = vim.pack.get()
+
+    if #installed_packs == 0 then
+        vim.notify("No plugins installed", vim.log.levels.INFO)
+        return
+    end
+
+    vim.notify("Installed plugins (" .. #installed_packs .. "):", vim.log.levels.INFO)
+
+    for _, pack in ipairs(installed_packs) do
+        local status = pack.active and "[ACTIVE]" or "[INACTIVE]"
+        local version = pack.spec.version or "unknown"
+        vim.notify(string.format("  %s %s (%s)", status, pack.spec.name, version), vim.log.levels.INFO)
+    end
+end
+
 -- Main installation function
 M.install = function()
     local all_plugins = {}
@@ -266,5 +284,12 @@ M.install = function()
         setup_plugin(setup_config, plugin_name, {})
     end
 end
+
+-- Create user commands
+vim.api.nvim_create_user_command("PackList", function()
+    M.list()
+end, {
+    desc = "List all installed plugins"
+})
 
 return M;

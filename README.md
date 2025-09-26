@@ -23,6 +23,14 @@ pack.require("plugins.example.init")
 
 -- Install all queued plugins with a single prompt
 pack.install()
+
+-- List all currently installed plugins
+pack.list()
+```
+
+Or use the command:
+```vim
+:PackList
 ```
 
 ## API Reference
@@ -66,6 +74,33 @@ pack.require("plugins.lsp")
 
 -- Install all queued plugins with one prompt
 pack.install()
+```
+
+### `pack.list()`
+
+Lists all currently installed plugins using the nvim pack API.
+
+**Behavior:**
+- Retrieves installed plugins using `vim.pack.get()`
+- Displays plugin name, status (active/inactive), and version
+- Shows total count of installed plugins
+
+**Command:**
+```vim
+:PackList
+```
+
+**Lua API:**
+```lua
+local pack = require("pack")
+
+-- List all installed plugins
+pack.list()
+-- Output:
+-- Installed plugins (25):
+--   [ACTIVE] nvim-treesitter (master)
+--   [INACTIVE] telescope.nvim (master)
+--   ...
 ```
 
 ## Usage Patterns
@@ -274,7 +309,7 @@ return {
 - **Organized Configuration**: Keep related plugins grouped in logical files and directories
 - **Batch Installation**: Install multiple plugins with a single confirmation prompt
 - **Flexible Loading**: Load plugins conditionally or in separate groups, with event-based triggering
-- **Simple API**: Just two main functions to learn and use
+- **Simple API**: Three main functions to manage your plugins
 - **Path Flexibility**: Use directory paths or specific file paths as needed
 - **Event Control**: Fine-tune when plugins load using autocmd events
 - **Automatic Cleanup**: Removes plugins that are no longer required, keeping your pack directory clean
