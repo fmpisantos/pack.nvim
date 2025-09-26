@@ -264,6 +264,34 @@ M.list = function()
     end
 end
 
+-- Update a specific plugin
+M.update = function(plugin_name)
+    if not plugin_name or plugin_name == "" then
+        vim.notify("Please specify a plugin name to update", vim.log.levels.ERROR)
+        return
+    end
+
+    -- Check if plugin is installed
+    local installed_packs = vim.pack.get()
+    local found = false
+
+    for _, pack in ipairs(installed_packs) do
+        if pack.spec.name == plugin_name then
+            found = true
+            break
+        end
+    end
+
+    if not found then
+        vim.notify("Plugin '" .. plugin_name .. "' is not installed", vim.log.levels.ERROR)
+        return
+    end
+
+    vim.notify("Updating plugin: " .. plugin_name, vim.log.levels.INFO)
+    vim.pack.update({plugin_name})
+    vim.notify("Plugin '" .. plugin_name .. "' update completed", vim.log.levels.INFO)
+end
+
 -- Main installation function
 M.install = function()
     local all_plugins = {}
@@ -285,11 +313,34 @@ M.install = function()
     end
 end
 
+-- Completion function for PackUpdate command
+local function pack_update_completion(arg_lead, cmd_line, cursor_pos)
+    local installed_packs = vim.pack.get()
+    local completions = {}
+
+    for _, pack in ipairs(installed_packs) do
+        if pack.spec.name:lower():find(arg_lead:lower(), 1, true) then
+            table.insert(completions, pack.spec.name)
+        end
+    end
+
+    table.sort(completions)
+    return completions
+end
+
 -- Create user commands
 vim.api.nvim_create_user_command("PackList", function()
     M.list()
 end, {
     desc = "List all installed plugins"
+})
+
+vim.api.nvim_create_user_command("PackUpdate", function(opts)
+    M.update(opts.args)
+end, {
+    desc = "Update a specific plugin",
+    nargs = 1,
+    complete = pack_update_completion
 })
 
 return M;
