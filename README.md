@@ -206,6 +206,35 @@ Since pack.nvim uses `vim.pack.add()` internally, your `src` field can use any f
 
 All standard `vim.pack.add()` options are supported. See |vim.pack.Spec| for the complete specification of available options.
 
+## Automatic Plugin Cleanup
+
+pack.nvim automatically removes plugins that are no longer required when you run `pack.install()`. This keeps your pack directory clean and prevents accumulation of unused plugins.
+
+**How it works:**
+- Before installing new plugins, pack.nvim scans all currently installed packs
+- It compares them against the plugins required by your current configuration (including dependencies)
+- Any installed plugins not found in the current requirements are automatically removed
+- You'll see notification messages when plugins are removed
+
+**Example:**
+```lua
+local pack = require("pack")
+
+-- Initially require many plugins
+pack.require("plugins.core")
+pack.require("plugins.lsp")
+pack.require("plugins.ui")
+pack.install() -- Installs all plugins
+
+-- Later, remove some requirements
+pack = require("pack") -- Reset sources
+pack.require("plugins.core") -- Only keep core plugins
+pack.install() -- Automatically removes LSP and UI plugins that are no longer needed
+```
+
+**Dependency Awareness:**
+The cleanup process respects dependencies. If plugin A depends on plugin B, and plugin A is still required, plugin B will not be removed even if it's not explicitly listed in your configuration.
+
 #### Plugin Event Loading
 
 You can control when plugins are loaded using the `event` option:
@@ -248,6 +277,7 @@ return {
 - **Simple API**: Just two main functions to learn and use
 - **Path Flexibility**: Use directory paths or specific file paths as needed
 - **Event Control**: Fine-tune when plugins load using autocmd events
+- **Automatic Cleanup**: Removes plugins that are no longer required, keeping your pack directory clean
 
 ## Tips
 

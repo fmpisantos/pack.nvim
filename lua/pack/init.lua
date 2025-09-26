@@ -65,6 +65,26 @@ local function get_plugin_key(plugin_spec)
     return source_url and extract_plugin_name_from_url(source_url) or nil
 end
 
+local function get_plugin_identifier(plugin_spec)
+    if type(plugin_spec) == "string" then
+        return extract_plugin_name_from_url(normalize_github_url(plugin_spec))
+    elseif plugin_spec.src then
+        return extract_plugin_name_from_url(normalize_github_url(plugin_spec.src))
+    elseif plugin_spec.name then
+        return plugin_spec.name
+    end
+    return nil
+end
+
+local function get_plugin_repo_name(plugin_spec)
+    local identifier = get_plugin_identifier(plugin_spec)
+    if identifier then
+        -- Extract just the repo name (after the last /)
+        return identifier:match("([^/]+)$")
+    end
+    return nil
+end
+
 -- Add a plugin source
 M.src = function(source)
     M.sources[#M.sources + 1] = source
@@ -194,6 +214,38 @@ local function prepare_plugin(source, all_plugins, parent_event)
     end
 end
 
+local function cleanup_unused_plugins(required_plugins)
+    local installed_packs = vim.pack.get()
+    local required_repo_names = {}
+
+    -- Build set of required plugin repo names
+    for _, plugin in ipairs(required_plugins) do
+        local repo_name = get_plugin_repo_name(plugin)
+        if repo_name then
+            required_repo_names[repo_name] = true
+        end
+    end
+
+    -- Find plugins to remove
+    local plugins_to_remove = {}
+    for _, pack in ipairs(installed_packs) do
+        local pack_repo_name = pack.spec.name
+        if pack_repo_name and not required_repo_names[pack_repo_name] then
+            table.insert(plugins_to_remove, pack)
+        end
+    end
+
+    -- Remove unused plugins
+    for _, pack in ipairs(plugins_to_remove) do
+        vim.notify("Removing unused plugin: " .. pack.spec.name, vim.log.levels.INFO)
+        vim.pack.del(pack.spec.src)
+    end
+
+    if #plugins_to_remove > 0 then
+        vim.notify("Removed " .. #plugins_to_remove .. " unused plugins", vim.log.levels.INFO)
+    end
+end
+
 -- Main installation function
 M.install = function()
     local all_plugins = {}
@@ -202,6 +254,9 @@ M.install = function()
     for _, source in ipairs(M.sources) do
         prepare_plugin(source, all_plugins, nil)
     end
+
+    -- Clean up plugins that are no longer required
+    cleanup_unused_plugins(all_plugins)
 
     -- Install all plugins
     vim.pack.add(all_plugins)
