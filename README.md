@@ -29,12 +29,16 @@ pack.list()
 
 -- Update a specific plugin
 pack.update("telescope.nvim")
+
+-- Update all installed plugins
+pack.update_all()
 ```
 
 Or use the commands:
 ```vim
 :PackList
 :PackUpdate telescope.nvim  " with <Tab> completion
+:PackUpdateAll
 ```
 
 ## API Reference
@@ -134,6 +138,29 @@ pack.update("telescope.nvim")
 
 **Autocompletion:**
 The `:PackUpdate` command supports autocompletion of installed plugin names. Press `<Tab>` after typing `:PackUpdate ` to see available plugins.
+
+### `pack.update_all()`
+
+Updates all installed plugins to their latest versions.
+
+**Behavior:**
+- Retrieves all currently installed plugins using `vim.pack.get()`
+- Uses `vim.pack.update()` to update all plugins at once
+- Shows progress messages during the batch update
+- Displays total count of plugins being updated
+
+**Command:**
+```vim
+:PackUpdateAll
+```
+
+**Lua API:**
+```lua
+local pack = require("pack")
+
+-- Update all installed plugins
+pack.update_all()
+```
 
 ## Usage Patterns
 
@@ -341,7 +368,7 @@ return {
 - **Organized Configuration**: Keep related plugins grouped in logical files and directories
 - **Batch Installation**: Install multiple plugins with a single confirmation prompt
 - **Flexible Loading**: Load plugins conditionally or in separate groups, with event-based triggering
-- **Simple API**: Four main functions to manage your plugins
+- **Simple API**: Five main functions to manage your plugins
 - **Path Flexibility**: Use directory paths or specific file paths as needed
 - **Event Control**: Fine-tune when plugins load using autocmd events
 - **Automatic Cleanup**: Removes plugins that are no longer required, keeping your pack directory clean

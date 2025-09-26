@@ -292,6 +292,28 @@ M.update = function(plugin_name)
     vim.notify("Plugin '" .. plugin_name .. "' update completed", vim.log.levels.INFO)
 end
 
+-- Update all installed plugins
+M.update_all = function()
+    local installed_packs = vim.pack.get()
+
+    if #installed_packs == 0 then
+        vim.notify("No plugins installed to update", vim.log.levels.INFO)
+        return
+    end
+
+    vim.notify("Updating all " .. #installed_packs .. " installed plugins...", vim.log.levels.INFO)
+
+    -- Collect all plugin names
+    local plugin_names = {}
+    for _, pack in ipairs(installed_packs) do
+        table.insert(plugin_names, pack.spec.name)
+    end
+
+    -- Update all plugins
+    vim.pack.update(plugin_names)
+    vim.notify("All plugins update completed", vim.log.levels.INFO)
+end
+
 -- Main installation function
 M.install = function()
     local all_plugins = {}
@@ -341,6 +363,12 @@ end, {
     desc = "Update a specific plugin",
     nargs = 1,
     complete = pack_update_completion
+})
+
+vim.api.nvim_create_user_command("PackUpdateAll", function()
+    M.update_all()
+end, {
+    desc = "Update all installed plugins"
 })
 
 return M;
