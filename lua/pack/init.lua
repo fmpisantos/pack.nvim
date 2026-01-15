@@ -148,10 +148,10 @@ local function setup_plugin(setup_config, plugin_name, dependency_chain)
                         return
                     end
                     vim.defer_fn(function()
-                    if not M.setup_completed[plugin_name] then
-                        setup_config.setup()
-                        M.setup_completed[plugin_name] = true
-                    end
+                        if not M.setup_completed[plugin_name] then
+                            setup_config.setup()
+                            M.setup_completed[plugin_name] = true
+                        end
                     end, 10)
                 end,
             })
@@ -272,7 +272,7 @@ local function get_remote_head_async(path, callback)
                     callback(nil, "Could not determine default branch")
                     return
                 end
-                
+
                 git_cmd_async({ "rev-parse", "--short", branches[index] }, path, function(result, branch_err)
                     if result and result ~= "" then
                         callback(result:gsub("\n+$", ""), nil)
@@ -281,7 +281,7 @@ local function get_remote_head_async(path, callback)
                     end
                 end)
             end
-            
+
             try_branch({ "origin/main", "origin/master" }, 1)
         end
     end)
