@@ -218,9 +218,10 @@ local function git_cmd_async(args, cwd, callback)
     vim.system(cmd, { cwd = cwd, text = true }, function(result)
         vim.schedule(function()
             if result.code ~= 0 then
-                callback(nil, result.stderr)
+                local err_msg = result.stderr or ("git command failed with code " .. tostring(result.code))
+                callback(nil, err_msg)
             else
-                callback((result.stdout or ""):gsub("\n+$", ""))
+                callback(result.stdout or "", nil)
             end
         end)
     end)
@@ -288,7 +289,7 @@ M.check_updates = function(callback)
 
         -- Fetch async
         git_cmd_async({ "fetch", "--quiet", "origin" }, pkg.path, function(_, fetch_err)
-            if fetch_err then
+            if fetch_err and fetch_err ~= "" then
                 on_package_checked(pkg, nil, nil, fetch_err)
                 check_next()
                 return
