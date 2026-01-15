@@ -287,12 +287,11 @@ local function get_remote_head_async(path, callback)
     end)
 end
 
--- Check for updates on all installed packages
+-- Check for updates on all installed packages (compares local vs cached remote HEAD)
 M.check_updates = function(callback)
     local packages = vim.pack.get()
     local updates_available = {}
     local total = #packages
-    local fetch_completed = 0
     local check_completed = 0
 
     if total == 0 then
@@ -300,92 +299,50 @@ M.check_updates = function(callback)
         return
     end
 
-    vim.notify(string.format("Fetching updates... (0/%d)", total), vim.log.levels.INFO)
+    vim.notify(string.format("Checking for updates... (0/%d)", total), vim.log.levels.INFO)
 
-    -- Step 1: Fetch all packages in parallel first
-    local fetch_errors = {}
-    local function on_fetch_complete()
-        fetch_completed = fetch_completed + 1
-        
-        -- Show fetch progress
-        vim.notify(
-            string.format("Fetching updates... (%d/%d)", fetch_completed, total),
-            vim.log.levels.INFO
-        )
-        
-        if fetch_completed == total then
-            -- All fetches done, now check for updates
-            vim.notify(string.format("Checking for updates... (0/%d)", total), vim.log.levels.INFO)
-            check_all_packages()
-        end
-    end
-
-    -- Step 2: After all fetches complete, check each package for updates
-    local function check_all_packages()
-        for _, pkg in ipairs(packages) do
-            if fetch_errors[pkg.spec.name] then
-                -- Skip packages that had fetch errors
+    for _, pkg in ipairs(packages) do
+        get_local_head_async(pkg.path, function(local_head, local_err)
+            if local_err then
+                vim.notify("Error checking " .. pkg.spec.name .. ": " .. local_err, vim.log.levels.WARN)
                 check_completed = check_completed + 1
                 if check_completed == total then
                     callback(updates_available)
                 end
-            else
-                -- Get local and remote HEAD
-                get_local_head_async(pkg.path, function(local_head, local_err)
-                    if local_err then
-                        vim.notify("Error checking " .. pkg.spec.name .. ": " .. local_err, vim.log.levels.WARN)
-                        check_completed = check_completed + 1
-                        if check_completed == total then
-                            callback(updates_available)
-                        end
-                        return
-                    end
-
-                    get_remote_head_async(pkg.path, function(remote_head, remote_err)
-                        if remote_err then
-                            vim.notify("Error checking " .. pkg.spec.name .. ": " .. remote_err, vim.log.levels.WARN)
-                        elseif local_head ~= remote_head then
-                            table.insert(updates_available, {
-                                name = pkg.spec.name,
-                                src = pkg.spec.src,
-                                path = pkg.path,
-                                local_rev = local_head,
-                                remote_rev = remote_head,
-                            })
-                        end
-
-                        check_completed = check_completed + 1
-                        
-                        -- Show check progress
-                        vim.notify(
-                            string.format("Checking for updates... (%d/%d)", check_completed, total),
-                            vim.log.levels.INFO
-                        )
-                        
-                        if check_completed == total then
-                            callback(updates_available)
-                        end
-                    end)
-                end)
+                return
             end
-        end
-    end
 
-    -- Fetch all packages in parallel
-    for _, pkg in ipairs(packages) do
-        git_cmd_async({ "fetch", "--quiet", "origin" }, pkg.path, function(_, fetch_err)
-            if fetch_err and fetch_err ~= "" then
-                fetch_errors[pkg.spec.name] = fetch_err
-                vim.notify("Error fetching " .. pkg.spec.name .. ": " .. fetch_err, vim.log.levels.WARN)
-            end
-            on_fetch_complete()
+            get_remote_head_async(pkg.path, function(remote_head, remote_err)
+                if remote_err then
+                    vim.notify("Error checking " .. pkg.spec.name .. ": " .. remote_err, vim.log.levels.WARN)
+                elseif local_head ~= remote_head then
+                    table.insert(updates_available, {
+                        name = pkg.spec.name,
+                        src = pkg.spec.src,
+                        path = pkg.path,
+                        local_rev = local_head,
+                        remote_rev = remote_head,
+                    })
+                end
+
+                check_completed = check_completed + 1
+
+                vim.notify(
+                    string.format("Checking for updates... (%d/%d)", check_completed, total),
+                    vim.log.levels.INFO
+                )
+
+                if check_completed == total then
+                    callback(updates_available)
+                end
+            end)
         end)
     end
 end
 
 -- Show telescope picker for package updates
 M.show_update_picker = function(updates)
-    local ok, telescope = pcall(require, "telescope")
+    local ok, _ = pcall(require, "telescope")
     if not ok then
         vim.notify("Telescope is required for :PackUpdate", vim.log.levels.ERROR)
         return
@@ -403,107 +360,100 @@ M.show_update_picker = function(updates)
         table.insert(entries, update)
     end
 
-    pickers
-        .new({}, {
-            prompt_title = "Package Updates Available",
-            finder = finders.new_table({
-                results = entries,
-                entry_maker = function(entry)
-                    if entry.is_update_all then
+    -- Use vim.schedule to ensure picker opens in a clean context
+    vim.schedule(function()
+        pickers
+            .new({
+                sorting_strategy = "ascending",
+                layout_strategy = "vertical",
+                layout_config = {
+                    height = math.min(#entries + 4, 20),
+                },
+            }, {
+                prompt_title = "Package Updates Available",
+                finder = finders.new_table({
+                    results = entries,
+                    entry_maker = function(entry)
+                        if entry.is_update_all then
+                            return {
+                                value = entry,
+                                display = entry.name,
+                                ordinal = entry.name,
+                            }
+                        end
                         return {
                             value = entry,
-                            display = entry.name,
+                            display = string.format("%s (%s -> %s)", entry.name, entry.local_rev, entry.remote_rev),
                             ordinal = entry.name,
                         }
+                    end,
+                }),
+                sorter = conf.generic_sorter({}),
+                attach_mappings = function(prompt_bufnr, map)
+                    -- Helper to process multi-selection
+                    local function handle_multi_selection()
+                        local picker = action_state.get_current_picker(prompt_bufnr)
+                        local multi_selections = picker:get_multi_selection()
+
+                        if #multi_selections > 0 then
+                            local names = {}
+                            local has_update_all = false
+                            for _, sel in ipairs(multi_selections) do
+                                if sel.value.is_update_all then
+                                    has_update_all = true
+                                    break
+                                end
+                                table.insert(names, sel.value.name)
+                            end
+
+                            if has_update_all then
+                                names = {}
+                                for _, update in ipairs(updates) do
+                                    table.insert(names, update.name)
+                                end
+                            end
+
+                            actions.close(prompt_bufnr)
+                            M._do_update(names)
+                            return true
+                        end
+                        return false
                     end
-                    return {
-                        value = entry,
-                        display = string.format("%s (%s -> %s)", entry.name, entry.local_rev, entry.remote_rev),
-                        ordinal = entry.name,
-                    }
+
+                    -- Handle single selection (Enter)
+                    actions.select_default:replace(function()
+                        local selection = action_state.get_selected_entry()
+                        if not selection then
+                            actions.close(prompt_bufnr)
+                            return
+                        end
+
+                        actions.close(prompt_bufnr)
+
+                        if selection.value.is_update_all then
+                            local names = {}
+                            for _, update in ipairs(updates) do
+                                table.insert(names, update.name)
+                            end
+                            M._do_update(names)
+                        else
+                            M._do_update({ selection.value.name })
+                        end
+                    end)
+
+                    -- Handle multi-selection (Tab to select, Enter to confirm)
+                    map("i", "<Tab>", actions.toggle_selection + actions.move_selection_worse)
+                    map("n", "<Tab>", actions.toggle_selection + actions.move_selection_worse)
+
+                    -- Handle confirming multi-selection
+                    map("i", "<C-q>", handle_multi_selection)
+                    map("n", "<C-q>", handle_multi_selection)
+
+                    return true
                 end,
-            }),
-            sorter = conf.generic_sorter({}),
-            attach_mappings = function(prompt_bufnr, map)
-                -- Handle single selection (Enter)
-                actions.select_default:replace(function()
-                    local selection = action_state.get_selected_entry()
-                    actions.close(prompt_bufnr)
-
-                    if selection.value.is_update_all then
-                        -- Update all packages
-                        local names = {}
-                        for _, update in ipairs(updates) do
-                            table.insert(names, update.name)
-                        end
-                        M._do_update(names)
-                    else
-                        -- Update single package
-                        M._do_update({ selection.value.name })
-                    end
-                end)
-
-                -- Handle multi-selection (Tab to select, Enter to confirm)
-                map("i", "<Tab>", actions.toggle_selection + actions.move_selection_worse)
-                map("n", "<Tab>", actions.toggle_selection + actions.move_selection_worse)
-
-                -- Handle confirming multi-selection
-                map("i", "<C-q>", function()
-                    local picker = action_state.get_current_picker(prompt_bufnr)
-                    local multi_selections = picker:get_multi_selection()
-                    actions.close(prompt_bufnr)
-
-                    if #multi_selections > 0 then
-                        local names = {}
-                        local has_update_all = false
-                        for _, sel in ipairs(multi_selections) do
-                            if sel.value.is_update_all then
-                                has_update_all = true
-                                break
-                            end
-                            table.insert(names, sel.value.name)
-                        end
-
-                        if has_update_all then
-                            -- If "Update All" is selected, update everything
-                            names = {}
-                            for _, update in ipairs(updates) do
-                                table.insert(names, update.name)
-                            end
-                        end
-                        M._do_update(names)
-                    end
-                end)
-                map("n", "<C-q>", function()
-                    local picker = action_state.get_current_picker(prompt_bufnr)
-                    local multi_selections = picker:get_multi_selection()
-                    actions.close(prompt_bufnr)
-
-                    if #multi_selections > 0 then
-                        local names = {}
-                        local has_update_all = false
-                        for _, sel in ipairs(multi_selections) do
-                            if sel.value.is_update_all then
-                                has_update_all = true
-                                break
-                            end
-                            table.insert(names, sel.value.name)
-                        end
-
-                        if has_update_all then
-                            names = {}
-                            for _, update in ipairs(updates) do
-                                table.insert(names, update.name)
-                            end
-                        end
-                        M._do_update(names)
-                    end
-                end)
-
-                return true
-            end,
-        })
-        :find()
+            })
+            :find()
+    end)
 end
 
 -- Perform the actual update
