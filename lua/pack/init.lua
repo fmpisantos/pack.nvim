@@ -5,11 +5,6 @@ M.sources = {}
 M.setup_completed = {}
 M.setup_functions = {}
 
--- Configuration
-M.config = {
-    parallel_check_count = 4,  -- Number of packages to check in parallel
-}
-
 -- Utility functions
 local function starts_with(str, prefix)
     return str:sub(1, #prefix) == prefix
@@ -297,87 +292,94 @@ M.check_updates = function(callback)
     local packages = vim.pack.get()
     local updates_available = {}
     local total = #packages
-    local completed = 0
-    local next_index = 1
+    local fetch_completed = 0
+    local check_completed = 0
 
     if total == 0 then
         callback({})
         return
     end
 
-    vim.notify("Checking for updates...", vim.log.levels.INFO)
+    vim.notify(string.format("Fetching updates... (0/%d)", total), vim.log.levels.INFO)
 
-    local function on_package_checked(pkg, local_head, remote_head, err)
-        if local_head and remote_head and local_head ~= remote_head then
-            table.insert(updates_available, {
-                name = pkg.spec.name,
-                src = pkg.spec.src,
-                path = pkg.path,
-                local_rev = local_head,
-                remote_rev = remote_head,
-            })
-        elseif err then
-            vim.notify("Error checking " .. pkg.spec.name .. ": " .. err, vim.log.levels.WARN)
-        end
-
-        completed = completed + 1
+    -- Step 1: Fetch all packages in parallel first
+    local fetch_errors = {}
+    local function on_fetch_complete()
+        fetch_completed = fetch_completed + 1
         
-        -- Show progress notification
+        -- Show fetch progress
         vim.notify(
-            string.format("Checking for updates... %d/%d", completed, total),
+            string.format("Fetching updates... (%d/%d)", fetch_completed, total),
             vim.log.levels.INFO
         )
         
-        if completed == total then
-            callback(updates_available)
+        if fetch_completed == total then
+            -- All fetches done, now check for updates
+            vim.notify(string.format("Checking for updates... (0/%d)", total), vim.log.levels.INFO)
+            check_all_packages()
         end
     end
 
-    -- Check a single package and then pick up the next one from the queue
-    local function check_next()
-        local index = next_index
-        next_index = next_index + 1
+    -- Step 2: After all fetches complete, check each package for updates
+    local function check_all_packages()
+        for _, pkg in ipairs(packages) do
+            if fetch_errors[pkg.spec.name] then
+                -- Skip packages that had fetch errors
+                check_completed = check_completed + 1
+                if check_completed == total then
+                    callback(updates_available)
+                end
+            else
+                -- Get local and remote HEAD
+                get_local_head_async(pkg.path, function(local_head, local_err)
+                    if local_err then
+                        vim.notify("Error checking " .. pkg.spec.name .. ": " .. local_err, vim.log.levels.WARN)
+                        check_completed = check_completed + 1
+                        if check_completed == total then
+                            callback(updates_available)
+                        end
+                        return
+                    end
 
-        if index > total then
-            return
+                    get_remote_head_async(pkg.path, function(remote_head, remote_err)
+                        if remote_err then
+                            vim.notify("Error checking " .. pkg.spec.name .. ": " .. remote_err, vim.log.levels.WARN)
+                        elseif local_head ~= remote_head then
+                            table.insert(updates_available, {
+                                name = pkg.spec.name,
+                                src = pkg.spec.src,
+                                path = pkg.path,
+                                local_rev = local_head,
+                                remote_rev = remote_head,
+                            })
+                        end
+
+                        check_completed = check_completed + 1
+                        
+                        -- Show check progress
+                        vim.notify(
+                            string.format("Checking for updates... (%d/%d)", check_completed, total),
+                            vim.log.levels.INFO
+                        )
+                        
+                        if check_completed == total then
+                            callback(updates_available)
+                        end
+                    end)
+                end)
+            end
         end
+    end
 
-        local pkg = packages[index]
-
-        -- Fetch async
+    -- Fetch all packages in parallel
+    for _, pkg in ipairs(packages) do
         git_cmd_async({ "fetch", "--quiet", "origin" }, pkg.path, function(_, fetch_err)
             if fetch_err and fetch_err ~= "" then
-                on_package_checked(pkg, nil, nil, fetch_err)
-                check_next()
-                return
+                fetch_errors[pkg.spec.name] = fetch_err
+                vim.notify("Error fetching " .. pkg.spec.name .. ": " .. fetch_err, vim.log.levels.WARN)
             end
-
-            -- Get local HEAD async
-            get_local_head_async(pkg.path, function(local_head, local_err)
-                if local_err then
-                    on_package_checked(pkg, nil, nil, local_err)
-                    check_next()
-                    return
-                end
-
-                -- Get remote HEAD async
-                get_remote_head_async(pkg.path, function(remote_head, remote_err)
-                    if remote_err then
-                        on_package_checked(pkg, nil, nil, remote_err)
-                    else
-                        on_package_checked(pkg, local_head, remote_head, nil)
-                    end
-                    
-                    check_next()
-                end)
-            end)
+            on_fetch_complete()
         end)
-    end
-
-    -- Start checking packages (process multiple in parallel for speed)
-    local parallel_count = math.min(M.config.parallel_check_count, total)
-    for _ = 1, parallel_count do
-        check_next()
     end
 end
 
