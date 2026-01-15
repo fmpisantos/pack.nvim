@@ -75,6 +75,7 @@ Checks all installed packages for available updates and displays them in a Teles
 **Behavior:**
 - Fetches from origin for all installed packages (parallelized for speed)
 - Compares local HEAD with remote HEAD to detect available updates
+- Shows progress notifications during the check process
 - If no updates are available, shows a notification and exits
 - If updates are found, opens a Telescope picker with selectable packages
 - Calls `vim.pack.update()` for selected packages
@@ -94,6 +95,25 @@ require("pack").update()
 ```
 
 **Note:** Telescope is required for the update picker interface.
+
+### `pack.config`
+
+Configuration options for pack.nvim behavior.
+
+**Options:**
+- `parallel_check_count` (number): Number of packages to check in parallel during `:PackUpdate` (default: 4)
+
+**Example:**
+```lua
+local pack = require("pack")
+
+-- Increase parallel checks for faster updates with many plugins
+pack.config.parallel_check_count = 8
+
+-- Queue and install plugins
+pack.require("plugins")
+pack.install()
+```
 
 ## Usage Patterns
 

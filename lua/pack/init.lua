@@ -5,6 +5,11 @@ M.sources = {}
 M.setup_completed = {}
 M.setup_functions = {}
 
+-- Configuration
+M.config = {
+    parallel_check_count = 4,  -- Number of packages to check in parallel
+}
+
 -- Utility functions
 local function starts_with(str, prefix)
     return str:sub(1, #prefix) == prefix
@@ -242,6 +247,51 @@ local function get_local_head(path)
     return git_cmd({ "rev-parse", "--short", "HEAD" }, path)
 end
 
+-- Async version: Get local HEAD commit hash
+local function get_local_head_async(path, callback)
+    git_cmd_async({ "rev-parse", "--short", "HEAD" }, path, callback)
+end
+
+-- Async version: Get default branch name
+local function get_default_branch_async(path, callback)
+    git_cmd_async({ "rev-parse", "--abbrev-ref", "origin/HEAD" }, path, function(result, err)
+        if err or not result or result == "" then
+            callback(nil, err or "No default branch")
+        else
+            callback(result:gsub("\n+$", ""), nil)
+        end
+    end)
+end
+
+-- Async version: Get remote HEAD commit hash
+local function get_remote_head_async(path, callback)
+    -- First try to get the default branch
+    get_default_branch_async(path, function(default_branch, err)
+        if default_branch then
+            -- Got default branch, get its HEAD
+            git_cmd_async({ "rev-parse", "--short", default_branch }, path, callback)
+        else
+            -- Fallback: try common branch names
+            local function try_branch(branches, index)
+                if index > #branches then
+                    callback(nil, "Could not determine default branch")
+                    return
+                end
+                
+                git_cmd_async({ "rev-parse", "--short", branches[index] }, path, function(result, branch_err)
+                    if result and result ~= "" then
+                        callback(result:gsub("\n+$", ""), nil)
+                    else
+                        try_branch(branches, index + 1)
+                    end
+                end)
+            end
+            
+            try_branch({ "origin/main", "origin/master" }, 1)
+        end
+    end)
+end
+
 -- Check for updates on all installed packages
 M.check_updates = function(callback)
     local packages = vim.pack.get()
@@ -271,6 +321,13 @@ M.check_updates = function(callback)
         end
 
         completed = completed + 1
+        
+        -- Show progress notification
+        vim.notify(
+            string.format("Checking for updates... %d/%d", completed, total),
+            vim.log.levels.INFO
+        )
+        
         if completed == total then
             callback(updates_available)
         end
@@ -295,37 +352,30 @@ M.check_updates = function(callback)
                 return
             end
 
-            -- Get local HEAD
-            local local_head = get_local_head(pkg.path)
-
-            -- Get remote HEAD
-            local default_branch = git_cmd({ "rev-parse", "--abbrev-ref", "origin/HEAD" }, pkg.path)
-            local remote_head
-
-            if default_branch then
-                remote_head = git_cmd({ "rev-parse", "--short", default_branch }, pkg.path)
-            else
-                -- Fallback: try common branch names
-                for _, branch in ipairs({ "origin/main", "origin/master" }) do
-                    remote_head = git_cmd({ "rev-parse", "--short", branch }, pkg.path)
-                    if remote_head then
-                        break
-                    end
+            -- Get local HEAD async
+            get_local_head_async(pkg.path, function(local_head, local_err)
+                if local_err then
+                    on_package_checked(pkg, nil, nil, local_err)
+                    check_next()
+                    return
                 end
-            end
 
-            if not remote_head then
-                on_package_checked(pkg, nil, nil, "Could not determine default branch")
-            else
-                on_package_checked(pkg, local_head, remote_head, nil)
-            end
-
-            check_next()
+                -- Get remote HEAD async
+                get_remote_head_async(pkg.path, function(remote_head, remote_err)
+                    if remote_err then
+                        on_package_checked(pkg, nil, nil, remote_err)
+                    else
+                        on_package_checked(pkg, local_head, remote_head, nil)
+                    end
+                    
+                    check_next()
+                end)
+            end)
         end)
     end
 
     -- Start checking packages (process multiple in parallel for speed)
-    local parallel_count = math.min(4, total)
+    local parallel_count = math.min(M.config.parallel_check_count, total)
     for _ = 1, parallel_count do
         check_next()
     end
