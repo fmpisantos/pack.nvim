@@ -68,6 +68,33 @@ pack.require("plugins.lsp")
 pack.install()
 ```
 
+### `pack.update()` / `:PackUpdate`
+
+Checks all installed packages for available updates and displays them in a Telescope picker.
+
+**Behavior:**
+- Fetches from origin for all installed packages (parallelized for speed)
+- Compares local HEAD with remote HEAD to detect available updates
+- If no updates are available, shows a notification and exits
+- If updates are found, opens a Telescope picker with selectable packages
+- Calls `vim.pack.update()` for selected packages
+
+**Telescope Picker Controls:**
+- `<Enter>` - Update the selected package (or all packages if "Update All" is selected)
+- `<Tab>` - Toggle selection for multi-select
+- `<C-q>` - Confirm and update all selected packages
+
+**Example:**
+```lua
+-- Programmatic usage
+require("pack").update()
+
+-- Or use the command
+:PackUpdate
+```
+
+**Note:** Telescope is required for the update picker interface.
+
 ## Usage Patterns
 
 ### Basic Plugin Organization
@@ -244,8 +271,9 @@ return {
 
 - **Organized Configuration**: Keep related plugins grouped in logical files and directories
 - **Batch Installation**: Install multiple plugins with a single confirmation prompt
+- **Easy Updates**: Check and update packages interactively with `:PackUpdate`
 - **Flexible Loading**: Load plugins conditionally or in separate groups, with event-based triggering
-- **Simple API**: Just two main functions to learn and use
+- **Simple API**: Just a few functions to learn and use
 - **Path Flexibility**: Use directory paths or specific file paths as needed
 - **Event Control**: Fine-tune when plugins load using autocmd events
 
@@ -257,6 +285,7 @@ return {
 4. **Leverage Conditionals**: Only load plugins when needed based on project type or environment
 5. **Choose Events Wisely**: Use specific events to optimize startup time and plugin loading
 6. **Oil File Consideration**: When working with oil files, prefer `VimEnter` for reliable plugin loading
+7. **Regular Updates**: Run `:PackUpdate` periodically to keep your plugins up to date
 
 ## Troubleshooting
 
@@ -266,3 +295,4 @@ return {
 - Make sure `pack.install()` is called after all `pack.require()` calls for each group
 - When using events, verify the event names are valid autocmd events
 - For oil file compatibility issues, try using `event = "VimEnter"` instead of other events
+- `:PackUpdate` requires Telescope to be installed for the picker interface
