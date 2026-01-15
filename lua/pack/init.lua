@@ -367,7 +367,9 @@ M.show_update_picker = function(updates)
                 sorting_strategy = "ascending",
                 layout_strategy = "vertical",
                 layout_config = {
-                    height = math.min(#entries + 4, 20),
+                    height = 0.9,
+                    width = 0.8,
+                    preview_cutoff = 20,
                 },
             }, {
                 prompt_title = "Package Updates Available",
