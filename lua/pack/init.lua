@@ -212,4 +212,273 @@ M.install = function()
     end
 end
 
+-- Helper function to run git commands asynchronously
+local function git_cmd_async(args, cwd, callback)
+    local cmd = vim.list_extend({ "git" }, args)
+    vim.system(cmd, { cwd = cwd, text = true }, function(result)
+        vim.schedule(function()
+            if result.code ~= 0 then
+                callback(nil, result.stderr)
+            else
+                callback((result.stdout or ""):gsub("\n+$", ""))
+            end
+        end)
+    end)
+end
+
+-- Helper function to run git commands synchronously
+local function git_cmd(args, cwd)
+    local cmd = vim.list_extend({ "git" }, args)
+    local result = vim.system(cmd, { cwd = cwd, text = true }):wait()
+    if result.code ~= 0 then
+        return nil, result.stderr
+    end
+    return (result.stdout or ""):gsub("\n+$", "")
+end
+
+-- Get local HEAD commit hash
+local function get_local_head(path)
+    return git_cmd({ "rev-parse", "--short", "HEAD" }, path)
+end
+
+-- Check for updates on all installed packages
+M.check_updates = function(callback)
+    local packages = vim.pack.get()
+    local updates_available = {}
+    local total = #packages
+    local completed = 0
+    local next_index = 1
+
+    if total == 0 then
+        callback({})
+        return
+    end
+
+    vim.notify("Checking for updates...", vim.log.levels.INFO)
+
+    local function on_package_checked(pkg, local_head, remote_head, err)
+        if local_head and remote_head and local_head ~= remote_head then
+            table.insert(updates_available, {
+                name = pkg.spec.name,
+                src = pkg.spec.src,
+                path = pkg.path,
+                local_rev = local_head,
+                remote_rev = remote_head,
+            })
+        elseif err then
+            vim.notify("Error checking " .. pkg.spec.name .. ": " .. err, vim.log.levels.WARN)
+        end
+
+        completed = completed + 1
+        if completed == total then
+            callback(updates_available)
+        end
+    end
+
+    -- Check a single package and then pick up the next one from the queue
+    local function check_next()
+        local index = next_index
+        next_index = next_index + 1
+
+        if index > total then
+            return
+        end
+
+        local pkg = packages[index]
+
+        -- Fetch async
+        git_cmd_async({ "fetch", "--quiet", "origin" }, pkg.path, function(_, fetch_err)
+            if fetch_err then
+                on_package_checked(pkg, nil, nil, fetch_err)
+                check_next()
+                return
+            end
+
+            -- Get local HEAD
+            local local_head = get_local_head(pkg.path)
+
+            -- Get remote HEAD
+            local default_branch = git_cmd({ "rev-parse", "--abbrev-ref", "origin/HEAD" }, pkg.path)
+            local remote_head
+
+            if default_branch then
+                remote_head = git_cmd({ "rev-parse", "--short", default_branch }, pkg.path)
+            else
+                -- Fallback: try common branch names
+                for _, branch in ipairs({ "origin/main", "origin/master" }) do
+                    remote_head = git_cmd({ "rev-parse", "--short", branch }, pkg.path)
+                    if remote_head then
+                        break
+                    end
+                end
+            end
+
+            if not remote_head then
+                on_package_checked(pkg, nil, nil, "Could not determine default branch")
+            else
+                on_package_checked(pkg, local_head, remote_head, nil)
+            end
+
+            check_next()
+        end)
+    end
+
+    -- Start checking packages (process multiple in parallel for speed)
+    local parallel_count = math.min(4, total)
+    for _ = 1, parallel_count do
+        check_next()
+    end
+end
+
+-- Show telescope picker for package updates
+M.show_update_picker = function(updates)
+    local ok, telescope = pcall(require, "telescope")
+    if not ok then
+        vim.notify("Telescope is required for :PackUpdate", vim.log.levels.ERROR)
+        return
+    end
+
+    local pickers = require("telescope.pickers")
+    local finders = require("telescope.finders")
+    local conf = require("telescope.config").values
+    local actions = require("telescope.actions")
+    local action_state = require("telescope.actions.state")
+
+    -- Prepend "Update All" option
+    local entries = { { name = ">> Update All <<", is_update_all = true } }
+    for _, update in ipairs(updates) do
+        table.insert(entries, update)
+    end
+
+    pickers
+        .new({}, {
+            prompt_title = "Package Updates Available",
+            finder = finders.new_table({
+                results = entries,
+                entry_maker = function(entry)
+                    if entry.is_update_all then
+                        return {
+                            value = entry,
+                            display = entry.name,
+                            ordinal = entry.name,
+                        }
+                    end
+                    return {
+                        value = entry,
+                        display = string.format("%s (%s -> %s)", entry.name, entry.local_rev, entry.remote_rev),
+                        ordinal = entry.name,
+                    }
+                end,
+            }),
+            sorter = conf.generic_sorter({}),
+            attach_mappings = function(prompt_bufnr, map)
+                -- Handle single selection (Enter)
+                actions.select_default:replace(function()
+                    local selection = action_state.get_selected_entry()
+                    actions.close(prompt_bufnr)
+
+                    if selection.value.is_update_all then
+                        -- Update all packages
+                        local names = {}
+                        for _, update in ipairs(updates) do
+                            table.insert(names, update.name)
+                        end
+                        M._do_update(names)
+                    else
+                        -- Update single package
+                        M._do_update({ selection.value.name })
+                    end
+                end)
+
+                -- Handle multi-selection (Tab to select, Enter to confirm)
+                map("i", "<Tab>", actions.toggle_selection + actions.move_selection_worse)
+                map("n", "<Tab>", actions.toggle_selection + actions.move_selection_worse)
+
+                -- Handle confirming multi-selection
+                map("i", "<C-q>", function()
+                    local picker = action_state.get_current_picker(prompt_bufnr)
+                    local multi_selections = picker:get_multi_selection()
+                    actions.close(prompt_bufnr)
+
+                    if #multi_selections > 0 then
+                        local names = {}
+                        local has_update_all = false
+                        for _, sel in ipairs(multi_selections) do
+                            if sel.value.is_update_all then
+                                has_update_all = true
+                                break
+                            end
+                            table.insert(names, sel.value.name)
+                        end
+
+                        if has_update_all then
+                            -- If "Update All" is selected, update everything
+                            names = {}
+                            for _, update in ipairs(updates) do
+                                table.insert(names, update.name)
+                            end
+                        end
+                        M._do_update(names)
+                    end
+                end)
+                map("n", "<C-q>", function()
+                    local picker = action_state.get_current_picker(prompt_bufnr)
+                    local multi_selections = picker:get_multi_selection()
+                    actions.close(prompt_bufnr)
+
+                    if #multi_selections > 0 then
+                        local names = {}
+                        local has_update_all = false
+                        for _, sel in ipairs(multi_selections) do
+                            if sel.value.is_update_all then
+                                has_update_all = true
+                                break
+                            end
+                            table.insert(names, sel.value.name)
+                        end
+
+                        if has_update_all then
+                            names = {}
+                            for _, update in ipairs(updates) do
+                                table.insert(names, update.name)
+                            end
+                        end
+                        M._do_update(names)
+                    end
+                end)
+
+                return true
+            end,
+        })
+        :find()
+end
+
+-- Perform the actual update
+M._do_update = function(names)
+    if #names == 0 then
+        return
+    end
+
+    vim.notify("Updating " .. #names .. " package(s)...", vim.log.levels.INFO)
+    vim.pack.update(names)
+end
+
+-- Main update command
+M.update = function()
+    M.check_updates(function(updates)
+        if #updates == 0 then
+            vim.notify("All packages are up to date!", vim.log.levels.INFO)
+            return
+        end
+
+        vim.notify("Found " .. #updates .. " package(s) with updates", vim.log.levels.INFO)
+        M.show_update_picker(updates)
+    end)
+end
+
+-- Register commands on module load
+vim.api.nvim_create_user_command("PackUpdate", function()
+    M.update()
+end, { desc = "Check and update packages via telescope picker" })
+
 return M;
