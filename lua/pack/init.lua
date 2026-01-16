@@ -258,31 +258,50 @@ local function get_default_branch_async(path, callback)
     end)
 end
 
+-- Async version: Get the current branch's upstream tracking ref
+local function get_upstream_ref_async(path, callback)
+    git_cmd_async({ "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}" }, path, function(result, err)
+        if err or not result or result == "" then
+            callback(nil, err or "No upstream tracking branch")
+        else
+            callback(result:gsub("\n+$", ""), nil)
+        end
+    end)
+end
+
 -- Async version: Get remote HEAD commit hash
 local function get_remote_head_async(path, callback)
-    -- First try to get the default branch
-    get_default_branch_async(path, function(default_branch, err)
-        if default_branch then
-            -- Got default branch, get its HEAD
-            git_cmd_async({ "rev-parse", "--short", default_branch }, path, callback)
+    -- First try to get the upstream tracking branch (most reliable)
+    get_upstream_ref_async(path, function(upstream_ref, err)
+        if upstream_ref then
+            -- Got upstream ref, get its HEAD
+            git_cmd_async({ "rev-parse", "--short", upstream_ref }, path, callback)
         else
-            -- Fallback: try common branch names
-            local function try_branch(branches, index)
-                if index > #branches then
-                    callback(nil, "Could not determine default branch")
-                    return
-                end
+            -- Fallback: try to get the default branch
+            get_default_branch_async(path, function(default_branch, default_err)
+                if default_branch then
+                    -- Got default branch, get its HEAD
+                    git_cmd_async({ "rev-parse", "--short", default_branch }, path, callback)
+                else
+                    -- Fallback: try common branch names
+                    local function try_branch(branches, index)
+                        if index > #branches then
+                            callback(nil, "Could not determine default branch")
+                            return
+                        end
 
-                git_cmd_async({ "rev-parse", "--short", branches[index] }, path, function(result, branch_err)
-                    if result and result ~= "" then
-                        callback(result:gsub("\n+$", ""), nil)
-                    else
-                        try_branch(branches, index + 1)
+                        git_cmd_async({ "rev-parse", "--short", branches[index] }, path, function(result, branch_err)
+                            if result and result ~= "" then
+                                callback(result:gsub("\n+$", ""), nil)
+                            else
+                                try_branch(branches, index + 1)
+                            end
+                        end)
                     end
-                end)
-            end
 
-            try_branch({ "origin/main", "origin/master" }, 1)
+                    try_branch({ "origin/main", "origin/master" }, 1)
+                end
+            end)
         end
     end)
 end
