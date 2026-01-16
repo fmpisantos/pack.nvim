@@ -287,11 +287,23 @@ local function get_remote_head_async(path, callback)
     end)
 end
 
--- Check for updates on all installed packages (compares local vs cached remote HEAD)
+-- Fetch updates from remote for a package
+local fetch_remote_async = function(path, callback)
+    git_cmd_async({ "fetch" }, path, function(result, err)
+        if err then
+            callback(false, err)
+        else
+            callback(true, nil)
+        end
+    end)
+end
+
+-- Check for updates on all installed packages (fetches from remote first, then compares local vs remote HEAD)
 M.check_updates = function(callback)
     local packages = vim.pack.get()
     local updates_available = {}
     local total = #packages
+    local fetch_completed = 0
     local check_completed = 0
 
     if total == 0 then
@@ -299,43 +311,64 @@ M.check_updates = function(callback)
         return
     end
 
-    vim.notify(string.format("Checking for updates... (0/%d)", total), vim.log.levels.INFO)
+    vim.notify(string.format("Fetching updates... (0/%d)", total), vim.log.levels.INFO)
 
+    -- First, fetch all remotes
     for _, pkg in ipairs(packages) do
-        get_local_head_async(pkg.path, function(local_head, local_err)
-            if local_err then
-                vim.notify("Error checking " .. pkg.spec.name .. ": " .. local_err, vim.log.levels.WARN)
-                check_completed = check_completed + 1
-                if check_completed == total then
-                    callback(updates_available)
-                end
-                return
+        fetch_remote_async(pkg.path, function(success, fetch_err)
+            if fetch_err then
+                vim.notify("Error fetching " .. pkg.spec.name .. ": " .. fetch_err, vim.log.levels.WARN)
             end
 
-            get_remote_head_async(pkg.path, function(remote_head, remote_err)
-                if remote_err then
-                    vim.notify("Error checking " .. pkg.spec.name .. ": " .. remote_err, vim.log.levels.WARN)
-                elseif local_head ~= remote_head then
-                    table.insert(updates_available, {
-                        name = pkg.spec.name,
-                        src = pkg.spec.src,
-                        path = pkg.path,
-                        local_rev = local_head,
-                        remote_rev = remote_head,
-                    })
+            fetch_completed = fetch_completed + 1
+
+            vim.notify(
+                string.format("Fetching updates... (%d/%d)", fetch_completed, total),
+                vim.log.levels.INFO
+            )
+
+            if fetch_completed == total then
+                -- After all fetches complete, check for updates
+                vim.notify(string.format("Checking for updates... (0/%d)", total), vim.log.levels.INFO)
+
+                for _, pkg in ipairs(packages) do
+                    get_local_head_async(pkg.path, function(local_head, local_err)
+                        if local_err then
+                            vim.notify("Error checking " .. pkg.spec.name .. ": " .. local_err, vim.log.levels.WARN)
+                            check_completed = check_completed + 1
+                            if check_completed == total then
+                                callback(updates_available)
+                            end
+                            return
+                        end
+
+                        get_remote_head_async(pkg.path, function(remote_head, remote_err)
+                            if remote_err then
+                                vim.notify("Error checking " .. pkg.spec.name .. ": " .. remote_err, vim.log.levels.WARN)
+                            elseif local_head ~= remote_head then
+                                table.insert(updates_available, {
+                                    name = pkg.spec.name,
+                                    src = pkg.spec.src,
+                                    path = pkg.path,
+                                    local_rev = local_head,
+                                    remote_rev = remote_head,
+                                })
+                            end
+
+                            check_completed = check_completed + 1
+
+                            vim.notify(
+                                string.format("Checking for updates... (%d/%d)", check_completed, total),
+                                vim.log.levels.INFO
+                            )
+
+                            if check_completed == total then
+                                callback(updates_available)
+                            end
+                        end)
+                    end)
                 end
-
-                check_completed = check_completed + 1
-
-                vim.notify(
-                    string.format("Checking for updates... (%d/%d)", check_completed, total),
-                    vim.log.levels.INFO
-                )
-
-                if check_completed == total then
-                    callback(updates_available)
-                end
-            end)
+            end
         end)
     end
 end
