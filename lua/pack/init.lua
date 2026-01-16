@@ -4,6 +4,7 @@ local M = {}
 M.sources = {}
 M.setup_completed = {}
 M.setup_functions = {}
+M.plugin_versions = {} -- Track configured version/branch for each plugin
 
 -- Utility functions
 local function starts_with(str, prefix)
@@ -36,6 +37,12 @@ local function extract_plugins_recursive(source_spec)
                 if key ~= "src" then
                     plugin_config[key] = value
                 end
+            end
+
+            -- Track version/branch for update checking
+            if source_spec.version then
+                local plugin_name = extract_plugin_name_from_url(plugin_config.src)
+                M.plugin_versions[plugin_name] = source_spec.version
             end
 
             plugins[#plugins + 1] = plugin_config
@@ -270,7 +277,28 @@ local function get_upstream_ref_async(path, callback)
 end
 
 -- Async version: Get remote HEAD commit hash
-local function get_remote_head_async(path, callback)
+-- If configured_branch is provided, use that branch for comparison
+local function get_remote_head_async(path, callback, configured_branch)
+    -- If a specific branch/version was configured, use it directly
+    if configured_branch then
+        local remote_ref = "origin/" .. configured_branch
+        git_cmd_async({ "rev-parse", "--short", remote_ref }, path, function(result, err)
+            if result and result ~= "" then
+                callback(result:gsub("\n+$", ""), nil)
+            else
+                -- Fallback to trying the configured branch name as a tag
+                git_cmd_async({ "rev-parse", "--short", configured_branch }, path, function(tag_result, tag_err)
+                    if tag_result and tag_result ~= "" then
+                        callback(tag_result:gsub("\n+$", ""), nil)
+                    else
+                        callback(nil, err or "Could not find configured branch/tag: " .. configured_branch)
+                    end
+                end)
+            end
+        end)
+        return
+    end
+
     -- First try to get the upstream tracking branch (most reliable)
     get_upstream_ref_async(path, function(upstream_ref, err)
         if upstream_ref then
@@ -361,6 +389,9 @@ M.check_updates = function(callback)
                             return
                         end
 
+                        -- Look up the configured version/branch for this plugin
+                        local configured_version = M.plugin_versions[pkg.spec.name]
+
                         get_remote_head_async(pkg.path, function(remote_head, remote_err)
                             if remote_err then
                                 vim.notify("Error checking " .. pkg.spec.name .. ": " .. remote_err, vim.log.levels.WARN)
@@ -384,7 +415,7 @@ M.check_updates = function(callback)
                             if check_completed == total then
                                 callback(updates_available)
                             end
-                        end)
+                        end, configured_version)
                     end)
                 end
             end
