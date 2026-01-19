@@ -22,7 +22,7 @@ local function extract_plugin_name_from_url(url)
     return url:gsub("https://.-/", "")
 end
 
-local function extract_plugins_recursive(source_spec)
+local function extract_plugins_recursive(source_spec, root_branch)
     local plugins = {}
 
     if type(source_spec) == "string" then
@@ -30,7 +30,7 @@ local function extract_plugins_recursive(source_spec)
     elseif type(source_spec) == "table" then
         if source_spec.src then
             -- Single plugin with configuration
-            local plugin_config = { src = normalize_github_url(source_spec.src) }
+            local plugin_config = { src = normalize_github_url(source_spec.src), branch = source_spec.version or root_branch }
 
             -- Copy other configuration options
             for key, value in pairs(source_spec) do
@@ -49,7 +49,7 @@ local function extract_plugins_recursive(source_spec)
         else
             -- Array of plugins
             for _, item in ipairs(source_spec) do
-                local extracted = extract_plugins_recursive(item)
+                local extracted = extract_plugins_recursive(item, root_branch)
                 for _, plugin in ipairs(extracted) do
                     plugins[#plugins + 1] = plugin
                 end
@@ -174,7 +174,7 @@ end
 
 local function prepare_plugin(source, all_plugins, parent_event)
     source = source.src and source or { src = source }
-    local extracted_plugins = extract_plugins_recursive(source.src and source.src or source)
+    local extracted_plugins = extract_plugins_recursive(source.src and source.src or source, source.version)
 
     -- Handle setup function and dependencies
     if source.setup then
@@ -278,7 +278,7 @@ end
 
 -- Async version: Get remote HEAD commit hash
 -- If configured_branch is provided, use that branch for comparison
-local function get_remote_head_async(path, callback, configured_branch)
+local function get_remote_head_async(path, callback, configured_branch) -- Entry point for Branch/version-configured remote
     -- If a specific branch/version was configured, use it directly
     if configured_branch then
         local remote_ref = "origin/" .. configured_branch
@@ -392,7 +392,7 @@ M.check_updates = function(callback)
                         -- Look up the configured version/branch for this plugin
                         local configured_version = M.plugin_versions[pkg.spec.name]
 
-                        get_remote_head_async(pkg.path, function(remote_head, remote_err)
+                        get_remote_head_async(pkg.path, function(remote_head, remote_err) -- Use branch if defined
                             if remote_err then
                                 vim.notify("Error checking " .. pkg.spec.name .. ": " .. remote_err, vim.log.levels.WARN)
                             elseif local_head ~= remote_head then
