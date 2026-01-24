@@ -216,7 +216,9 @@ local function prepare_plugin(source, all_plugins, parent_event)
 
     -- Add main plugins to installation list
     for _, plugin in ipairs(extracted_plugins) do
-        all_plugins[#all_plugins + 1] = plugin
+        if type(plugin) ~= "table" or not plugin.dev then
+            all_plugins[#all_plugins + 1] = plugin
+        end
     end
 end
 
