@@ -22,15 +22,28 @@ local function extract_plugin_name_from_url(url)
     return url:gsub("https://.-/", "")
 end
 
+local function is_cancellation_error(err)
+    return type(err) == "string" and err:match("Installation was not confirmed")
+end
+
 local function extract_plugins_recursive(source_spec, root_branch)
     local plugins = {}
 
     if type(source_spec) == "string" then
         plugins[#plugins + 1] = normalize_github_url(source_spec)
     elseif type(source_spec) == "table" then
+        if source_spec.disabled then
+            return {}
+        end
+
         if source_spec.src then
             -- Single plugin with configuration
-            local plugin_config = { src = normalize_github_url(source_spec.src), branch = source_spec.version or root_branch }
+            local src = source_spec.src
+            if not source_spec.dev then
+                src = normalize_github_url(src)
+            end
+
+            local plugin_config = { src = src, branch = source_spec.version or root_branch }
 
             -- Copy other configuration options
             for key, value in pairs(source_spec) do
@@ -174,7 +187,13 @@ end
 
 local function prepare_plugin(source, all_plugins, parent_event)
     source = source.src and source or { src = source }
-    local extracted_plugins = extract_plugins_recursive(source.src and source.src or source, source.version)
+
+    local extract_target = source
+    if type(source.src) == "table" then
+        extract_target = source.src
+    end
+
+    local extracted_plugins = extract_plugins_recursive(extract_target, source.version)
 
     -- Handle setup function and dependencies
     if source.setup then
@@ -211,7 +230,15 @@ M.install = function()
     end
 
     -- Install all plugins
-    vim.pack.add(all_plugins)
+    local ok, err = pcall(vim.pack.add, all_plugins)
+    if not ok then
+        if is_cancellation_error(err) then
+            vim.notify("Plugin installation cancelled", vim.log.levels.WARN)
+            return
+        else
+            error(tostring(err))
+        end
+    end
 
     -- Run setup functions for all plugins
     for plugin_name, setup_config in pairs(M.setup_functions) do
