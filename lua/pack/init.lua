@@ -157,6 +157,17 @@ local function setup_plugin(setup_config, plugin_name, dependency_chain)
     -- Setup the plugin when event triggers
     if type(setup_config.setup) == "function" and not M.setup_completed[plugin_name] then
         local events = setup_config.event
+        
+        local function run_setup()
+            if not M.setup_completed[plugin_name] then
+                if setup_config.load_manually then
+                    pcall(vim.cmd, "packadd " .. plugin_name)
+                end
+                setup_config.setup()
+                M.setup_completed[plugin_name] = true
+            end
+        end
+
         if events then
             if type(events) == "string" then
                 events = { events }
@@ -167,18 +178,12 @@ local function setup_plugin(setup_config, plugin_name, dependency_chain)
                     if args.event ~= "VimEnter" and args.file:match("^oil://") then
                         return
                     end
-                    vim.defer_fn(function()
-                        if not M.setup_completed[plugin_name] then
-                            setup_config.setup()
-                            M.setup_completed[plugin_name] = true
-                        end
-                    end, 10)
+                    vim.defer_fn(run_setup, 10)
                 end,
             })
         else
             -- No event: setup immediately
-            setup_config.setup()
-            M.setup_completed[plugin_name] = true
+            run_setup()
         end
     end
 
@@ -194,10 +199,35 @@ local function prepare_plugin(source, all_plugins, parent_event)
     end
 
     local extracted_plugins = extract_plugins_recursive(extract_target, source.version)
+    local main_plugin_name = get_plugin_key(extracted_plugins)
+    
+    -- Handle dev plugins: check existence and skip install if dev=true
+    local is_dev = source.dev
+    -- Check if any extracted plugin is dev (legacy support or granular control)
+    if not is_dev and #extracted_plugins > 0 and type(extracted_plugins[1]) == "table" and extracted_plugins[1].dev then
+        is_dev = true
+    end
+
+    if is_dev and main_plugin_name then
+        local install_path = vim.fn.stdpath("data") .. "/site/pack/core/opt/" .. main_plugin_name
+        if vim.fn.isdirectory(install_path) == 0 then
+            -- Dev plugin directory missing: treat as disabled
+            return
+        end
+        -- Dev plugin exists: mark for manual loading
+        if source.setup then
+            source.load_manually = true
+        end
+    end
 
     -- Handle setup function and dependencies
     if source.setup then
-        local setup_config = { setup = source.setup, deps = source.deps, event = source.event or parent_event }
+        local setup_config = { 
+            setup = source.setup, 
+            deps = source.deps, 
+            event = source.event or parent_event,
+            load_manually = source.load_manually 
+        }
 
         -- Process dependencies
         if source.deps then
