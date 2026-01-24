@@ -19,7 +19,8 @@ local function normalize_github_url(source)
 end
 
 local function extract_plugin_name_from_url(url)
-    return url:gsub("https://.-/", "")
+    -- Remove .git suffix if present and getting the last part of the URL
+    return url:gsub("%.git$", ""):match("([^/]+)$") or url
 end
 
 local function is_cancellation_error(err)
